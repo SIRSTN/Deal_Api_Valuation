@@ -96,7 +96,7 @@ def get_last_valuation(db, deal_uid):
     )
     return latest_valuation
 
-def create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount, init_volume, sold_volume, sold_amount):
+def create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount, init_volume, init_price, sold_volume, sold_amount):
     valuations_collection = db["Valuations"]
     valuation = {
         "DealUID": deal_uid,
@@ -105,6 +105,7 @@ def create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount, 
         "Price": bav_price,
         "Amount": bav_amount,
         "Init_Volume": init_volume,
+        "Init_Price": init_price,
         "Sold_Volume": sold_volume,
         "Sold_Amount": sold_amount
     }
@@ -125,15 +126,13 @@ def valuate_deals():
         deals = get_deals(db, keyword, "N")
         for deal in deals:
             deal_uid = deal.get("DealUID")
-            
             deal_versionSEQ = deal.get("VersionSEQ")
             deal_Volume = deal.get("Volume") 
             deal_Amount = deal.get("Amount") 
  
             last_valuation = get_last_valuation(db, deal_uid)
-            
             init_volume = last_valuation.get("Init_Volume")
-            
+            init_price = last_valuation.get("Init_Price")
             if last_valuation.get("Date") < bav_date:
                 
                 bav_volume = deal_Volume
@@ -150,12 +149,14 @@ def valuate_deals():
                 else:
                     last_sell_transaction = get_last_transaction(db, deal_uid, "Sell")
                     if last_sell_transaction:
-                        last_sell_Amount = last_sell_transaction.get("Amount")
-                        if (deal_Amount - bav_amount) > last_sell_Amount:
-                            buy_amount = last_sell_Amount
+                        sell_volume = last_sell_transaction.get("Volume")
+                        sell_amount = last_sell_transaction.get("Amount")
+                        if (deal_Amount - bav_amount) > sell_amount:
+                            buy_amount = sell_amount
                             buy_volume = buy_amount / bav_price
                             bav_volume = bav_volume + buy_volume
                             bav_amount = bav_volume * bav_price
+                            deal_Amount = ((buy_volume - sell_volume) * init_price) + deal_Amount
                             deal_price = deal_Amount / bav_volume
                             update_last_transaction(db, deal_uid, "Sell")
                             create_transaction(db, deal_uid, "Buy", bav_date, buy_volume, bav_price, buy_amount)
@@ -163,7 +164,7 @@ def valuate_deals():
                             create_deal(db, deal_uid, keyword, bav_date, bav_volume, deal_price, deal_Amount, deal_versionSEQ + 1)
                 
                 sold_volume, sold_amount = get_sell_transactions(db, deal_uid)
-                create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount, init_volume, sold_volume, sold_amount)
+                create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount, init_volume, init_price, sold_volume, sold_amount)
         
         return jsonify({"message": "Updated documents and inserted transactions successfully"}), 200
     except ValueError:
