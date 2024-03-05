@@ -1,8 +1,18 @@
 from flask import Flask, request, jsonify
-import pymongo
+from pymongo import MongoClient
 import datetime
+from configparser import ConfigParser
 
 app = Flask(__name__)
+
+# Load configuration file
+config = ConfigParser()
+config.read('config.ini')
+
+# Setup MongoDB Client
+#client = MongoClient(config.get('DEAL_API_VALUATION', 'MongoClient'))
+client = MongoClient("mongodb://localhost:27017/")
+db = client['Deal_Transactions']
     
 def get_deals(db, keyword, inactive_flag):
     deals_collection = db["Deals"]
@@ -38,6 +48,20 @@ def get_last_transaction(db, deal_uid, type):
     )
     return last_sell_transaction
 
+import pymongo
+
+def get_sell_transactions(db, deal_uid):
+    transactions_collection = db["Transactions"]
+    query = {"DealUID": deal_uid, "Type": "Sell", "InactiveFlag": "N"}
+    sell_transactions = transactions_collection.find(query)
+    
+    sold_volume = 0
+    sold_amount = 0
+    for transaction in sell_transactions:
+        sold_volume += transaction.get("Volume", 0)
+        sold_amount += transaction.get("Amount", 0)
+    return sold_volume, sold_amount
+
 def update_last_transaction(db, deal_uid, type):
     last_sell_transaction = get_last_transaction(db, deal_uid, type)
     if last_sell_transaction:
@@ -72,14 +96,17 @@ def get_last_valuation(db, deal_uid):
     )
     return latest_valuation
 
-def create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount):
+def create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount, init_volume, sold_volume, sold_amount):
     valuations_collection = db["Valuations"]
     valuation = {
         "DealUID": deal_uid,
         "Date": bav_date,
         "Volume": bav_volume,
         "Price": bav_price,
-        "Amount": bav_amount
+        "Amount": bav_amount,
+        "Init_Volume": init_volume,
+        "Sold_Volume": sold_volume,
+        "Sold_Amount": sold_amount
     }
     valuations_collection.insert_one(valuation)
 
@@ -95,21 +122,22 @@ def valuate_deals():
         return jsonify({"error": "Parameters are required"}), 400
 
     try:
-        client = pymongo.MongoClient("mongodb://localhost:27017/")
-        db = client["Deal_Transactions"]
-
         deals = get_deals(db, keyword, "N")
         for deal in deals:
             deal_uid = deal.get("DealUID")
+            
             deal_versionSEQ = deal.get("VersionSEQ")
             deal_Volume = deal.get("Volume") 
             deal_Amount = deal.get("Amount") 
-            
+ 
             last_valuation = get_last_valuation(db, deal_uid)
-            if last_valuation and last_valuation.get("Date") < bav_date:
+            
+            init_volume = last_valuation.get("Init_Volume")
+            
+            if last_valuation.get("Date") < bav_date:
+                
                 bav_volume = deal_Volume
                 bav_amount = bav_volume * bav_price
-
                 if bav_amount >= deal_Amount * 1.05:
                     sell_amount = bav_amount - deal_Amount
                     sell_volume = sell_amount / bav_price
@@ -134,12 +162,10 @@ def valuate_deals():
                             update_deal(db, deal_uid, deal_versionSEQ, "Y")
                             create_deal(db, deal_uid, keyword, bav_date, bav_volume, deal_price, deal_Amount, deal_versionSEQ + 1)
                 
-                create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount)
-
-            client.close()
-            return jsonify({"message": "Updated documents and inserted transactions successfully"}), 200
-        else:
-            return jsonify({"error": "Failed to fetch the Bitcoin price for the specified date"}), 500
+                sold_volume, sold_amount = get_sell_transactions(db, deal_uid)
+                create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount, init_volume, sold_volume, sold_amount)
+        
+        return jsonify({"message": "Updated documents and inserted transactions successfully"}), 200
     except ValueError:
         return jsonify({"error": "Invalid date format. Please use DD-MM-YYYY."}), 400
 
