@@ -96,10 +96,11 @@ def get_last_valuation(db, deal_uid):
     )
     return latest_valuation
 
-def create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount, init_volume, init_price, sold_volume, sold_amount):
+def create_valuation(db, deal_uid, deal_keyword, bav_date, bav_volume, bav_price, bav_amount, init_volume, init_price, sold_volume, sold_amount):
     valuations_collection = db["Valuations"]
     valuation = {
         "DealUID": deal_uid,
+        "Keyword": deal_keyword,
         "Date": bav_date,
         "Volume": bav_volume,
         "Price": bav_price,
@@ -164,7 +165,7 @@ def valuate_deals():
                             create_deal(db, deal_uid, keyword, bav_date, bav_volume, deal_price, deal_Amount, deal_versionSEQ + 1)
                 
                 sold_volume, sold_amount = get_sell_transactions(db, deal_uid)
-                create_valuation(db, deal_uid, bav_date, bav_volume, bav_price, bav_amount, init_volume, init_price, sold_volume, sold_amount)
+                create_valuation(db, deal_uid, keyword, bav_date, bav_volume, bav_price, bav_amount, init_volume, init_price, sold_volume, sold_amount)
         
         return jsonify({"message": "Updated documents and inserted transactions successfully"}), 200
     except ValueError:
